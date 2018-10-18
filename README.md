@@ -1,13 +1,18 @@
 # ext4-journal
 A script to parse the contents of ext4 journal
 
+---------------------------------------------------------------------
+
 Provide executable permissions to the script before running it
 
 $ sudo chmod +x parse_journal
 
+----------------------------------------------------------------------
 
 Run script as 
 $ sudo ./parse_journal file_system_image.dd
+
+----------------------------------------------------------------------
 
 By default, only information about the first 64 journal blocks are displayed - from block 0 to block 63.
 
