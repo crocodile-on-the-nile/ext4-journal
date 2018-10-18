@@ -1,0 +1,143 @@
+#!/bin/bash
+if [ $EUID != 0 ]; then
+    echo "Please run as root"
+    exit
+fi
+if [ $# -eq 0 ]; then
+	echo "Use: \$sudo ./parse_journal <image_name>"
+	echo "<image_name> is the file system image to be processed for a journal"
+	exit
+fi
+echo -e "\nEXTRACTING INFORMATION FROM SUPERBLOCK\n"
+dd if=$1 of=superblock.dd bs=1024 skip=1 count=1 > /dev/null 2>&1
+echo -e "\nINFORMATION FROM SUPERBLOCK\n"
+inode_size=$((0x$(xxd -p -l2 -s88 superblock.dd | grep -o .. | tac | paste -sd '')))
+echo "Size of an inode in bytes:" $inode_size
+
+isj=$((0x$(xxd -p -l4 -s92 superblock.dd | grep -o .. | tac | paste -sd '')))
+if [ $(($isj&0x4)) -eq 4 ] 
+then
+	echo "File system has a journal"
+else 
+	echo "File system does not have a journal"	
+	exit
+fi
+
+incompat_flag=$((0x$(xxd -p -l4 -s96 superblock.dd | grep -o .. | tac | paste -sd '')))
+if [ $(($incompat_flag&8)) -eq 8 ] 
+then
+	echo "File system has separate journal device"
+	j_device=$((0x$(xxd -p -l4 -s228 superblock.dd | grep -o .. | tac | paste -sd '')))
+	echo "Journal is present in device " $j_device
+else 
+	echo "Journal is part of file system"
+	j_inode=$((0x$(xxd -p -l4 -s224 superblock.dd | grep -o .. | tac | paste -sd '')))
+	echo "Journal is present at inode " $j_inode
+	j_mode=$((0x$(xxd -p -l4 -s256 superblock.dd | grep -o .. | tac | paste -sd '')))
+	if [ $(($j_mode&0x2)) -eq 2 ]
+	then
+		echo "Journal mode is used"
+	elif [ $(($j_mode&0x4)) -eq 4 ]
+	then
+		echo "Ordered journal mode is used (default)"
+	elif [ $(($j_mode&0x6)) -eq 6 ]
+	then 
+		echo "Writeback journal mode is used"
+	fi	
+fi
+
+rm superblock.dd
+
+echo -e "\nEXTRACTING INFORMATION FROM JOURNAL\n"
+icat $1 $j_inode > journal.dd
+
+block_sig=$(xxd -p -l4 -s0 journal.dd)
+if [[ $block_sig == c03b3998 ]]
+then
+	if [ $(xxd -p -l4 -s4 journal.dd) -eq 4 ]
+	then
+		echo "Block 0:Journal Superblock, sequence no:" $((0x$(xxd -p -l4 -s8 journal.dd)))
+		jb_size=$((0x$(xxd -p -l4 -s12 journal.dd)))
+		echo -e "\tJournal Block Size:" $jb_size "bytes"
+		dd if=/dev/zero of=zero.dd bs=$jb_size count=$(($jb_size/$jb_size)) > /dev/null 2>&1
+		j_nblocks=$((0x$(xxd -p -l4 -s16 journal.dd)))
+		echo -e "\tTotal number of blocks in journal:" $j_nblocks
+		echo -e "\tCOMPAT flags:" $(xxd -p -l4 -s36 journal.dd)
+		echo -e "\tINCOMPAT flags:" $(xxd -p -l4 -s40 journal.dd)	
+		echo -e "\tROCOMPAT flags:" $(xxd -p -l4 -s44 journal.dd)	
+	fi
+else
+	echo "Invalid Journal Block"
+fi
+
+echo -e "\nPROCESSING JOURNAL BLOCKS\n"
+
+for (( block=1; block<=63; block++))
+do
+	flag=0
+	dd if=journal.dd of=current_JB.dd bs=$jb_size skip=$block count=1 > /dev/null 2>&1
+	diff zero.dd current_JB.dd > /dev/null 2>&1
+	if [ $? -eq 0 ]
+	then
+		echo -en "\n$block" "-> Unused Journal Block "
+	elif [[ $(xxd -p -l4 -s0 current_JB.dd) == c03b3998 ]]
+	then
+		trans=$((0x$(xxd -p -l4 -s8 current_JB.dd)))
+		echo -en "\n"$block "-> "
+		if [ $((0x$(xxd -p -l4 -s4 current_JB.dd))) -eq 1 ]
+		then
+		echo -n "Descriptor block for transaction "$trans
+		dd if=current_JB.dd of=current_tag.dd bs=12 skip=1 > /dev/null 2>&1
+		flag=0
+		for (( inblock=0; inblock<=4083; inblock++))
+		do
+			if [ $((0x$(xxd -p -l4 -s40 journal.dd)&16)) == 16 ] && [ $flag -eq 0 ]
+			then
+				start=0
+				end=31
+				((++block))
+				lbytes=`xxd -p -l $(($start+4)) -s $start current_tag.dd`
+				ubytes=`xxd -p -l4 -s $(($start+8)) current_tag.dd`
+				loc="$ubytes$lbytes"
+				echo -en "\n$block" "-> Block "$((0x$loc))
+				flag=1
+				inblock=$(($inblock+$end))
+				ff=$((0x$(xxd -p -l4 -s $(($start+4)) current_tag.dd)))
+				ff=$(($ff&0x8))
+				if [ $ff -eq 8 ]		
+				then
+					rm current_tag.dd
+					break
+				fi
+			elif [ $flag -eq 1 ]
+			then
+				start=$(($end+1))
+				end=$(($start+15))
+				((++block))
+				lbytes=`xxd -p -l4 -s $start current_tag.dd`
+				ubytes=`xxd -p -l4 -s $(($start+8)) current_tag.dd`
+				loc="$ubytes$lbytes"
+				echo -en "\n$block" "-> Block "$((0x$loc))
+				inblock=$(($inblock+$end))
+				ff=$((0x$(xxd -p -l4 -s $(($start+4)) current_tag.dd)))
+				ff=$(($ff&0x8))
+				if [ $ff -eq 8 ]							
+				then
+					rm current_tag.dd
+					break
+				fi
+			fi
+		done
+		elif [ $((0x$(xxd -p -l4 -s4 current_JB.dd))) -eq 2 ]
+		then
+			echo -n "Commit block for transaction "$trans
+		elif [ $((0x$(xxd -p -l4 -s4 current_JB.dd))) -eq 5 ]
+		then
+			echo -n "Revoke block for transaction "$trans	
+		fi
+	else  
+		echo -en "\n$block" "-> Partial information of earlier transaction  "
+	fi	
+	rm current_JB.dd
+done
+echo ""
