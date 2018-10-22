@@ -126,6 +126,41 @@ do
 					rm current_tag.dd
 					break
 				fi
+			elif [ $((0x$(xxd -p -l4 -s40 journal.dd)&16)) == 0 ] && [ $flag -eq 0 ]
+			then
+				start=0
+				end=23
+				((++block))
+				lbytes=`xxd -p -l $(($start+4)) -s $start current_tag.dd`
+				ubytes=`xxd -p -l4 -s $(($start+8)) current_tag.dd`
+				loc="$ubytes$lbytes"
+				echo -en "\n$block" "-> Block "$((0x$loc))
+				flag=2
+				inblock=$(($inblock+$end))
+				ff=$((0x$(xxd -p -l4 -s $(($start+4)) current_tag.dd)))
+				ff=$(($ff&0x8))
+				if [ $ff -eq 8 ]		
+				then
+					rm current_tag.dd
+					break
+				fi
+			elif [ $flag -eq 2 ]
+			then
+				start=$(($end+1))
+				end=$(($start+7))
+				((++block))
+				lbytes=`xxd -p -l4 -s $start current_tag.dd`
+				loc="$lbytes"
+				echo -en "\n$block" "-> Block "$((0x$loc))
+				inblock=$(($inblock+$end))
+				ff=$((0x$(xxd -p -l4 -s $(($start+4)) current_tag.dd)))
+				ff=$(($ff&0x8))
+				if [ $ff -eq 8 ]							
+				then
+					rm current_tag.dd
+					break
+				fi
+
 			fi
 		done
 		elif [ $((0x$(xxd -p -l4 -s4 current_JB.dd))) -eq 2 ]
