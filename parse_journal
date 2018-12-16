@@ -142,7 +142,7 @@ then
 		fi	
 		rm current_JB.dd
 	done
-elif [ $jb_size -eq 1024 ]
+elif [ $jb_size -eq 1024 ] || [ $jb_size -eq 2048 ]
 then
 	echo "1024"
 	for (( block=1; block<=63; block++))
