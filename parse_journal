@@ -34,15 +34,14 @@ else
 	j_inode=$((0x$(xxd -p -l4 -s224 superblock.dd | grep -o .. | tac | paste -sd '')))
 	echo "Journal is present at inode " $j_inode
 	j_mode=$((0x$(xxd -p -l4 -s256 superblock.dd | grep -o .. | tac | paste -sd '')))
-	if [ $(($j_mode&0x2)) -eq 2 ]
+	if [ $(($j_mode&0x6)) -eq 6 ]
 	then
 		echo "Journal mode is used"
-	elif [ $(($j_mode&0x4)) -eq 4 ]
+	elif [ $(($j_mode&0x6)) -eq 6 ] && [ $(($j_mode&0x7)) -eq 7 ]
 	then
-		echo "Ordered journal mode is used (default)"
-	elif [ $(($j_mode&0x6)) -eq 6 ]
-	then 
 		echo "Writeback journal mode is used"
+	else
+		echo "Ordered journal mode is used (default)"
 	fi	
 fi
 
