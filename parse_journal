@@ -1,4 +1,11 @@
 #!/bin/bash
+#########################################################################################
+#									                #
+# Author: Divya Lakshmanan							        #
+# 										        #
+# The script can also be found at https://github.com/divya-lakshmanan/ext4-journal      #
+#											#
+#########################################################################################
 if [ $EUID != 0 ]; then
     echo "Please run as root"
     exit
@@ -33,13 +40,21 @@ else
 	echo "Journal is part of file system"
 	j_inode=$((0x$(xxd -p -l4 -s224 superblock.dd | grep -o .. | tac | paste -sd '')))
 	echo "Journal is present at inode " $j_inode
-	j_mode=$((0x$(xxd -p -l4 -s256 superblock.dd | grep -o .. | tac | paste -sd '')))
-	if [ $(($j_mode&0x6)) -eq 6 ]
+
+	j_mode=$((0x$(xxd -p -l1 -s256 superblock.dd | grep -o .. | tac | paste -sd '')))
+	j_mode_bin=$(($j_mode))
+	bin=$(echo "obase=2;${j_mode_bin}" | bc)
+
+	if [ $(($bin&0x32)) -eq 32 ] && [ $(($bin&0x64)) -eq 100 ]
 	then
 		echo "Journal mode is used"
-	elif [ $(($j_mode&0x6)) -eq 6 ] && [ $(($j_mode&0x7)) -eq 7 ]
+		echo "Script is being updated to support this mode - you can follow the changes in github"
+		exit
+	elif [ $(($bin&0x32)) -eq 32 ] 
 	then
 		echo "Writeback journal mode is used"
+		echo "Script is being updated to support this mode - you can follow the changes in github"
+		exit
 	else
 		echo "Ordered journal mode is used (default)"
 	fi	
